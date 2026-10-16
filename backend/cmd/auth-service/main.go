@@ -5,12 +5,17 @@ import (
 	"log"
 	"market/internal/auth"
 	"net/http"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
-	pool, err := pgxpool.New(context.Background(), "postgres://postgres:1234@localhost:5432/market?sslmode=disable")
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://postgres:1234@localhost:5432/market?sslmode=disable"
+	}
+	pool, err := pgxpool.New(context.Background(), databaseURL)
 
 	if err != nil {
 		log.Fatal(err)

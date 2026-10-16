@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: '1234'
+      POSTGRES_DB: market
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./backend/internal/auth/migrations/init.sql:/docker-entrypoint-initdb.d/01-auth.sql:ro
+      - ./backend/internal/product/migrations/init.sql:/docker-entrypoint-initdb.d/02-product.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d market"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - market
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - market
+
+  auth-service:
+    build:
+      context: ./backend
+      args:
+        SERVICE: auth-service
+    environment:
+      DATABASE_URL: postgres://postgres:1234@postgres:5432/market?sslmode=disable
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - market
+
+  product-service:
+    build:
+      context: ./backend
+      args:
+        SERVICE: product-service
+    environment:
+      DATABASE_URL: postgres://postgres:1234@postgres:5432/market?sslmode=disable
+      REDIS_ADDR: redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - market
+
+  frontend:
+    build: ./frontend
+    environment:
+      PRODUCT_SERVICE_URL: http://product-service:8081
+    ports:
+      - "3000:3000"
+    depends_on:
+      - product-service
+    networks:
+      - market
+
+networks:
+  market:
+
+volumes:
+  postgres_data:

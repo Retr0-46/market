@@ -2,297 +2,171 @@ package product
 
 import (
 	"context"
-	"errors"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 type Repository struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	rdb      *redis.Client
+	cacheTTL time.Duration
 }
 
-func NewRepository(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
+func NewRepository(pool *pgxpool.Pool, rdb *redis.Client) *Repository {
+	return &Repository{pool: pool, rdb: rdb}
 }
 
-// WithTx runs fn in a database transaction. The transaction is committed
-// when fn returns nil and rolled back when fn returns an error.
-func (r *Repository) WithTx(ctx context.Context, fn func(pgx.Tx) error) error {
-	return pgx.BeginFunc(ctx, r.pool, fn)
-}
+func (r *Repository) CreateProduct(ctx context.Context, productType string, sellerID int64, name string, price, stockQuantity int64) (Product, error) {
+	var prod Product
 
-// CreateProduct inserts a product and returns the saved row.
-func (r *Repository) CreateProduct(ctx context.Context, typeID, sellerID int64, name string, price, stockQuantity int64) (Product, error) {
-	var product Product
+	row := r.pool.QueryRow(ctx, `INSERT INTO products (p_type, seller_id, name, price, stock_quantity) VALUES ($1, $2, $3, $4, $5) RETURNING id, p_type, seller_id, name, price, stock_quantity`,
+		productType, sellerID, name, price, stockQuantity)
+	err := row.Scan(&prod.ID, &prod.Type, &prod.SellerID, &prod.Name, &prod.Price, &prod.StockQuantity)
 
-	err := r.pool.QueryRow(ctx, `
-		INSERT INTO products (type_id, seller_id, name, price, stock_quantity)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, type_id, seller_id, name, price, stock_quantity
-	`, typeID, sellerID, name, price, stockQuantity).Scan(
-		&product.ID,
-		&product.TypeID,
-		&product.SellerID,
-		&product.Name,
-		&product.Price,
-		&product.StockQuantity,
-	)
 	if err != nil {
 		return Product{}, err
 	}
 
-	return product, nil
+	return prod, nil
 }
 
-func (r *Repository) GetProduct(ctx context.Context, id int64) (Product, error) {
-	var product Product
+func (r *Repository) GetProductByID(ctx context.Context, id int64) (Product, error) {
+	var prod Product
 
-	err := r.pool.QueryRow(ctx, `
-		SELECT id, type_id, seller_id, name, price, stock_quantity
-		FROM products
-		WHERE id = $1
-	`, id).Scan(
-		&product.ID,
-		&product.TypeID,
-		&product.SellerID,
-		&product.Name,
-		&product.Price,
-		&product.StockQuantity,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Product{}, ErrProductNotFound
+	cmd := r.rdb.HGetAll(ctx, r.key(id))
+
+	if len(cmd.Val()) != 0 {
+		if err := cmd.Scan(&prod); err != nil {
+			return prod, nil
+		}
 	}
+
+	row := r.pool.QueryRow(ctx, `SELECT id, p_type, seller_id, name, price, stock_quantity FROM products WHERE id = $1`, id)
+	err := row.Scan(&prod.ID, &prod.Type, &prod.SellerID, &prod.Name, &prod.Price, &prod.StockQuantity)
+
 	if err != nil {
 		return Product{}, err
 	}
 
-	return product, nil
+	_ = r.rdb.HSet(ctx, r.key(prod.ID), prod).Err()
+	_ = r.rdb.Expire(ctx, r.key(prod.ID), r.cacheTTL).Err()
+
+	return prod, nil
 }
 
-// ListProducts returns all products. If a type ID is supplied, only products
-// belonging to that type are returned.
-func (r *Repository) ListProducts(ctx context.Context, typeID ...int64) ([]Product, error) {
+func (r *Repository) key(id int64) string {
+	return "product:" + strconv.FormatInt(id, 10)
+}
+
+// GetListProduct возвращает список продуктов заданных типов с лимитом number.
+// Если pTypes пуст — фильтр по типу не применяется.
+//
+// Схема:
+//  1. Из БД берём только id (index-only scan, дёшево).
+//  2. Пайплайном читаем продукты из Redis по id.
+//  3. Промахи одним батчем добираем из БД и прогреваем кэш.
+//  4. Собираем результат в исходном порядке.
+func (r *Repository) GetListProduct(ctx context.Context, number int64, pTypes ...string) ([]Product, error) {
+	if number <= 0 {
+		return nil, ErrNegativeNumber
+	}
+
+	// 1. Получаем только id
 	var (
 		rows pgx.Rows
 		err  error
 	)
-
-	switch len(typeID) {
-	case 0:
-		rows, err = r.pool.Query(ctx, `
-			SELECT id, type_id, seller_id, name, price, stock_quantity
-			FROM products
-			ORDER BY id
-		`)
-	case 1:
-		rows, err = r.pool.Query(ctx, `
-			SELECT id, type_id, seller_id, name, price, stock_quantity
-			FROM products
-			WHERE type_id = $1
-			ORDER BY id
-		`, typeID[0])
-	default:
-		return nil, errors.New("at most one product type ID may be supplied")
+	if len(pTypes) == 0 {
+		rows, err = r.pool.Query(ctx,
+			`SELECT id FROM products LIMIT $1`, number)
+	} else {
+		rows, err = r.pool.Query(ctx,
+			`SELECT id FROM products WHERE p_type = ANY($1) LIMIT $2`, pTypes, number)
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	products := make([]Product, 0)
+	ids := make([]int64, 0, number)
 	for rows.Next() {
-		var product Product
-		if err := rows.Scan(&product.ID, &product.TypeID, &product.SellerID, &product.Name, &product.Price, &product.StockQuantity); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		products = append(products, product)
+		ids = append(ids, id)
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if len(ids) == 0 {
+		return []Product{}, nil
+	}
+
+	// 2. Пайплайном читаем из Redis
+	pipe := r.rdb.Pipeline()
+	cmds := make([]*redis.MapStringStringCmd, len(ids))
+	for i, id := range ids {
+		cmds[i] = pipe.HGetAll(ctx, r.key(id))
+	}
+	// Общая ошибка Exec интересует мало — проверяем каждую команду отдельно,
+	// чтобы корректно отработать частичный промах.
+	_, _ = pipe.Exec(ctx)
+
+	found := make(map[int64]Product, len(ids))
+	var missing []int64
+	for i, id := range ids {
+		cmd := cmds[i]
+		if cmd.Err() != nil || len(cmd.Val()) == 0 {
+			missing = append(missing, id)
+			continue
+		}
+		var p Product
+		if err := cmd.Scan(&p); err != nil {
+			missing = append(missing, id)
+			continue
+		}
+		found[id] = p
+	}
+
+	// 3. Промахи — одним запросом в БД
+	if len(missing) > 0 {
+		rows, err := r.pool.Query(ctx,
+			`SELECT id, p_type, seller_id, name, price, stock_quantity
+			 FROM products WHERE id = ANY($1)`, missing)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		pipe := r.rdb.Pipeline()
+		for rows.Next() {
+			var p Product
+			if err := rows.Scan(&p.ID, &p.Type, &p.SellerID, &p.Name, &p.Price, &p.StockQuantity); err != nil {
+				return nil, err
+			}
+			found[p.ID] = p
+			pipe.HSet(ctx, r.key(p.ID), p)
+			pipe.Expire(ctx, r.key(p.ID), r.cacheTTL)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		_, _ = pipe.Exec(ctx)
+	}
+
+	// 4. Собираем в исходном порядке id
+	products := make([]Product, 0, len(ids))
+	for _, id := range ids {
+		if p, ok := found[id]; ok {
+			products = append(products, p)
+		}
 	}
 
 	return products, nil
-}
-
-// GetProducts is an alias for ListProducts without a type filter.
-func (r *Repository) GetProducts(ctx context.Context) ([]Product, error) {
-	return r.ListProducts(ctx)
-}
-
-func (r *Repository) GetProductsByType(ctx context.Context, typeID int64) ([]Product, error) {
-	return r.ListProducts(ctx, typeID)
-}
-
-// GetProductsBySeller returns all products owned by a seller.
-func (r *Repository) GetProductsBySeller(ctx context.Context, sellerID int64) ([]Product, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, type_id, seller_id, name, price, stock_quantity
-		FROM products
-		WHERE seller_id = $1
-		ORDER BY id
-	`, sellerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	products := make([]Product, 0)
-	for rows.Next() {
-		var product Product
-		if err := rows.Scan(&product.ID, &product.TypeID, &product.SellerID, &product.Name, &product.Price, &product.StockQuantity); err != nil {
-			return nil, err
-		}
-		products = append(products, product)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return products, nil
-}
-
-func (r *Repository) UpdateProduct(ctx context.Context, id, typeID, sellerID int64, name string, price, stockQuantity int64) (Product, error) {
-	var product Product
-
-	err := r.pool.QueryRow(ctx, `
-		UPDATE products
-		SET type_id = $2, seller_id = $3, name = $4, price = $5, stock_quantity = $6
-		WHERE id = $1
-		RETURNING id, type_id, seller_id, name, price, stock_quantity
-	`, id, typeID, sellerID, name, price, stockQuantity).Scan(
-		&product.ID,
-		&product.TypeID,
-		&product.SellerID,
-		&product.Name,
-		&product.Price,
-		&product.StockQuantity,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Product{}, ErrProductNotFound
-	}
-	if err != nil {
-		return Product{}, err
-	}
-
-	return product, nil
-}
-
-// DecreaseStockTx atomically reserves quantity units of a product. The caller
-// owns tx and decides when the whole transaction is committed.
-func (r *Repository) DecreaseStockTx(ctx context.Context, tx pgx.Tx, productID, quantity int64) (Product, error) {
-	if quantity <= 0 {
-		return Product{}, ErrInvalidQuantity
-	}
-
-	var product Product
-	err := tx.QueryRow(ctx, `
-		UPDATE products
-		SET stock_quantity = stock_quantity - $1
-		WHERE id = $2 AND stock_quantity >= $1
-		RETURNING id, type_id, seller_id, name, price, stock_quantity
-	`, quantity, productID).Scan(
-		&product.ID,
-		&product.TypeID,
-		&product.SellerID,
-		&product.Name,
-		&product.Price,
-		&product.StockQuantity,
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		var exists bool
-		if existsErr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM products WHERE id = $1)`, productID).Scan(&exists); existsErr != nil {
-			return Product{}, existsErr
-		}
-		if !exists {
-			return Product{}, ErrProductNotFound
-		}
-		return Product{}, ErrInsufficientStock
-	}
-	if err != nil {
-		return Product{}, err
-	}
-
-	return product, nil
-}
-
-func (r *Repository) DeleteProduct(ctx context.Context, id int64) error {
-	result, err := r.pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	if result.RowsAffected() == 0 {
-		return ErrProductNotFound
-	}
-
-	return nil
-}
-
-func (r *Repository) CreateProductType(ctx context.Context, code, name string) (ProductType, error) {
-	var productType ProductType
-
-	err := r.pool.QueryRow(ctx, `
-		INSERT INTO product_types (code, name)
-		VALUES ($1, $2)
-		RETURNING id, code, name
-	`, code, name).Scan(
-		&productType.ID,
-		&productType.Code,
-		&productType.Name,
-	)
-
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return ProductType{}, ErrProductTypeAlreadyExists
-	}
-	if err != nil {
-		return ProductType{}, err
-	}
-
-	return productType, nil
-}
-
-func (r *Repository) GetProductType(ctx context.Context, id int64) (ProductType, error) {
-	var productType ProductType
-
-	err := r.pool.QueryRow(ctx, `
-		SELECT id, code, name
-		FROM product_types
-		WHERE id = $1
-	`, id).Scan(&productType.ID, &productType.Code, &productType.Name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ProductType{}, ErrProductTypeNotFound
-	}
-	if err != nil {
-		return ProductType{}, err
-	}
-
-	return productType, nil
-}
-
-func (r *Repository) ListProductTypes(ctx context.Context) ([]ProductType, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, code, name
-		FROM product_types
-		ORDER BY id
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	types := make([]ProductType, 0)
-	for rows.Next() {
-		var productType ProductType
-		if err := rows.Scan(&productType.ID, &productType.Code, &productType.Name); err != nil {
-			return nil, err
-		}
-		types = append(types, productType)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return types, nil
 }

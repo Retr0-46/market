@@ -8,21 +8,24 @@ var (
 	ErrProductTypeAlreadyExists = errors.New("product type with this code already exists")
 	ErrInvalidQuantity          = errors.New("quantity must be positive")
 	ErrInsufficientStock        = errors.New("insufficient product stock")
+	ErrWrongIdentificator       = errors.New("wrong identificator given")
+	ErrNegativeNumber           = errors.New("number must be positive")
 )
 
 // Product is a row from the products table.
 type Product struct {
-	ID            int64
-	TypeID        int64
-	SellerID      int64
-	Name          string
-	Price         int64
-	StockQuantity int64
+	ID            int64       `redis:"id"`
+	Type          ProductType `redis:"type"`
+	SellerID      int64       `redis:"seller_id"`
+	Name          string      `redis:"name"`
+	Price         int64       `redis:"price"`
+	StockQuantity int64       `redis:"stock_quantity"`
 }
 
-// ProductType is a row from the product_types table.
-type ProductType struct {
-	ID   int64
-	Code string
-	Name string
-}
+type ProductType string
+
+const (
+	ProductTypeFood   ProductType = "food"
+	ProductTypeSport  ProductType = "sport"
+	ProducTypeClothes ProductType = "clothes"
+)

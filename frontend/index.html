@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Market — каталог товаров</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">market<span class="brand-dot">.</span></a>
+    <span class="header-caption">Простой каталог товаров</span>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <p class="eyebrow">Каталог</p>
+        <h1>Найдите то, что нужно.</h1>
+        <p class="intro-copy">Выберите категорию и посмотрите товары, доступные в магазине.</p>
+      </div>
+      <div class="intro-mark" aria-hidden="true">✳</div>
+    </section>
+
+    <section class="catalog" aria-labelledby="catalog-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Витрина</p>
+          <h2 id="catalog-title">Товары</h2>
+        </div>
+        <label class="limit-label">Показать
+          <select id="limit" aria-label="Количество товаров">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="40" selected>40</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="filters" role="group" aria-label="Категории товаров">
+        <button class="filter active" type="button" data-type="" aria-pressed="true">Все товары</button>
+        <button class="filter" type="button" data-type="sport" aria-pressed="false">Спорт</button>
+        <button class="filter" type="button" data-type="electronics" aria-pressed="false">Электроника</button>
+        <button class="filter" type="button" data-type="books" aria-pressed="false">Книги</button>
+        <button class="filter" type="button" data-type="clothes" aria-pressed="false">Одежда</button>
+      </div>
+
+      <p id="status" class="status" role="status">Загружаем товары…</p>
+      <div id="products" class="product-grid"></div>
+    </section>
+  </main>
+
+  <dialog id="product-dialog" class="product-dialog" aria-labelledby="dialog-title">
+    <button id="close-dialog" class="close-button" type="button" aria-label="Закрыть">×</button>
+    <div id="product-detail"></div>
+  </dialog>
+</body>
+</html>
