@@ -138,7 +138,7 @@ func (r *Repository) CreditBalanceTx(ctx context.Context, tx pgx.Tx, userID, amo
 func (r *Repository) getUserByID(ctx context.Context, id int64) (User, error) {
 	var user User
 
-	row := r.pool.QueryRow(ctx, `SELECT id, username, password_hash, is_active, created_at, updated_at FROM users WHERE id = $1`, id)
+	row := r.pool.QueryRow(ctx, `SELECT id, username, password_hash, balance, account_type FROM users WHERE id = $1`, id)
 	err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Balance, &user.AccountType)
 
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -155,7 +155,7 @@ func (r *Repository) getUserByID(ctx context.Context, id int64) (User, error) {
 func (r *Repository) getUserByUsername(ctx context.Context, name string) (User, error) {
 	var user User
 
-	row := r.pool.QueryRow(ctx, `SELECT id, username, password_hash, is_active, created_at, updated_at FROM users WHERE username = $1`, name)
+	row := r.pool.QueryRow(ctx, `SELECT id, username, password_hash, balance, account_type FROM users WHERE username = $1`, name)
 	err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Balance, &user.AccountType)
 
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -13,9 +13,9 @@ type AuthModule struct {
 	tokenManager *platform.TokenManager
 }
 
-func NewAuthModule(pool *pgxpool.Pool) *AuthModule {
+func NewAuthModule(pool *pgxpool.Pool, secret []byte) *AuthModule {
 	repo := NewRepository(pool)
-	tkManager := platform.NewTokenManager([]byte("secret"), time.Minute*3)
+	tkManager := platform.NewTokenManager(secret, time.Minute*3)
 	serv := NewService(repo, tkManager)
 	hand := NewHandler(serv)
 

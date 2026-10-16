@@ -60,8 +60,8 @@ func (tm *TokenManager) VerifyAccessToken(raw string) (int64, error) {
 
 	token, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) { return tm.secret, nil },
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
-		jwt.WithIssuer("authlearn"),
-		jwt.WithAudience("authlearn-api"),
+		jwt.WithIssuer("market"),
+		jwt.WithAudience("market"),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
 	)

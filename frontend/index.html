@@ -10,7 +10,12 @@
 <body>
   <header class="site-header">
     <a class="brand" href="/">market<span class="brand-dot">.</span></a>
-    <span class="header-caption">Простой каталог товаров</span>
+    <div class="header-actions">
+      <span id="user-name" class="user-name" hidden></span>
+      <button id="auth-button" class="header-button" type="button">Войти</button>
+      <button id="logout-button" class="header-button" type="button" hidden>Выйти</button>
+      <button id="cart-button" class="header-button cart-button" type="button">Корзина <span id="cart-count" class="cart-count" hidden>0</span></button>
+    </div>
   </header>
 
   <main>
@@ -54,6 +59,32 @@
   <dialog id="product-dialog" class="product-dialog" aria-labelledby="dialog-title">
     <button id="close-dialog" class="close-button" type="button" aria-label="Закрыть">×</button>
     <div id="product-detail"></div>
+  </dialog>
+
+  <dialog id="auth-dialog" class="product-dialog" aria-labelledby="auth-title">
+    <button id="close-auth" class="close-button" type="button" aria-label="Закрыть">×</button>
+    <h2 id="auth-title">Вход</h2>
+    <div class="auth-tabs">
+      <button id="login-tab" class="filter active" type="button" aria-pressed="true">Войти</button>
+      <button id="register-tab" class="filter" type="button" aria-pressed="false">Регистрация</button>
+    </div>
+    <form id="auth-form" class="auth-form">
+      <label>Имя пользователя<input id="username" name="username" autocomplete="username" required></label>
+      <label>Пароль<input id="password" name="password" type="password" autocomplete="current-password" minlength="4" required></label>
+      <p id="auth-error" class="form-error" role="alert"></p>
+      <button id="auth-submit" class="primary-button" type="submit">Войти</button>
+    </form>
+  </dialog>
+
+  <dialog id="cart-dialog" class="cart-dialog" aria-labelledby="cart-title">
+    <button id="close-cart" class="close-button" type="button" aria-label="Закрыть">×</button>
+    <h2 id="cart-title">Корзина</h2>
+    <p id="cart-status" class="status" role="status"></p>
+    <div id="cart-items"></div>
+    <div id="cart-footer" class="cart-footer" hidden>
+      <strong id="cart-total"></strong>
+      <button id="clear-cart" class="text-button" type="button">Очистить корзину</button>
+    </div>
   </dialog>
 </body>
 </html>

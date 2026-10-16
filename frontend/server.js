@@ -4,6 +4,8 @@ const path = require('node:path');
 
 const port = Number(process.env.FRONTEND_PORT || 3000);
 const productService = process.env.PRODUCT_SERVICE_URL || 'http://localhost:8081';
+const authService = process.env.AUTH_SERVICE_URL || 'http://localhost:8080';
+const cartService = process.env.CART_SERVICE_URL || 'http://localhost:8082';
 const files = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
@@ -13,8 +15,16 @@ const files = {
 http.createServer((request, response) => {
   const pathname = new URL(request.url, 'http://localhost').pathname;
 
-  if (pathname === '/products' || pathname.startsWith('/products/')) {
-    const target = new URL(request.url, productService);
+  const service = pathname === '/products' || pathname.startsWith('/products/')
+    ? productService
+    : pathname === '/auth' || pathname.startsWith('/auth/')
+      ? authService
+      : pathname === '/cart' || pathname.startsWith('/cart/')
+        ? cartService
+        : null;
+
+  if (service) {
+    const target = new URL(request.url, service);
     const upstream = http.request(target, {
       method: request.method,
       headers: { ...request.headers, host: target.host }
@@ -26,7 +36,7 @@ http.createServer((request, response) => {
       if (!response.headersSent) {
         response.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
       }
-      response.end('Product service is unavailable');
+      response.end('Service is unavailable');
     });
     request.pipe(upstream);
     return;

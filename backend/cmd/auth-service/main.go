@@ -25,7 +25,11 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	auth := auth.NewAuthModule(pool)
+	secret := os.Getenv("TOKEN_SECRET")
+	if secret == "" {
+		secret = "secret"
+	}
+	auth := auth.NewAuthModule(pool, []byte(secret))
 
 	auth.RegisterRoutes(mux)
 
