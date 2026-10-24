@@ -16,6 +16,15 @@ type Repository struct {
 	cacheTTL time.Duration
 }
 
+// ProductRepository is the persistence boundary used by the product service.
+type ProductRepository interface {
+	CreateProduct(ctx context.Context, productType string, sellerID int64, name string, price, stockQuantity int64) (Product, error)
+	GetProductByID(ctx context.Context, id int64) (Product, error)
+	GetListProduct(ctx context.Context, number int64, pTypes ...string) ([]Product, error)
+}
+
+var _ ProductRepository = (*Repository)(nil)
+
 func NewRepository(pool *pgxpool.Pool, rdb *redis.Client) *Repository {
 	return &Repository{pool: pool, rdb: rdb}
 }

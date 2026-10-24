@@ -6,10 +6,21 @@ import (
 )
 
 type Service struct {
-	repo *Repository
+	repo CartRepository
 }
 
-func NewService(repo *Repository) *Service {
+// CartService is the application boundary used by HTTP handlers.
+type CartService interface {
+	GetCart(ctx context.Context, userID int64) ([]Item, error)
+	AddItem(ctx context.Context, userID, productID, quantity int64) (Item, error)
+	SetItem(ctx context.Context, userID, productID, quantity int64) (Item, error)
+	DeleteItem(ctx context.Context, userID, productID int64) error
+	ClearCart(ctx context.Context, userID int64) error
+}
+
+var _ CartService = (*Service)(nil)
+
+func NewService(repo CartRepository) *Service {
 	return &Service{repo: repo}
 }
 

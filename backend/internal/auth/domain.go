@@ -27,7 +27,13 @@ type User struct {
 	AccountType  string
 }
 
-type jwtToken struct {
+// LoginResult contains the access token returned after a successful login.
+// It is exported so callers can implement AuthService in tests without
+// depending on an unexported return type.
+type LoginResult struct {
 	AccessToken string
 	ExpiresAt   time.Time
 }
+
+// jwtToken is kept as an alias for code that used the old internal name.
+type jwtToken = LoginResult

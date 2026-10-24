@@ -7,11 +7,20 @@ import (
 )
 
 type Service struct {
-	repo         *Repository
-	tokenManager *platform.TokenManager
+	repo         UserRepository
+	tokenManager platform.TokenManagerInterface
 }
 
-func NewService(repo *Repository, tkManager *platform.TokenManager) *Service {
+// AuthService is the application boundary used by HTTP handlers.
+type AuthService interface {
+	Register(ctx context.Context, username, password, accountType string) (User, error)
+	Login(ctx context.Context, username, password string) (LoginResult, error)
+	GetUserInfo(ctx context.Context, userID int64) (User, error)
+}
+
+var _ AuthService = (*Service)(nil)
+
+func NewService(repo UserRepository, tkManager platform.TokenManagerInterface) *Service {
 	return &Service{repo: repo, tokenManager: tkManager}
 }
 
@@ -44,24 +53,24 @@ func (s *Service) Register(ctx context.Context, username, password, accountType 
 	return user, nil
 }
 
-func (s *Service) Login(ctx context.Context, username, password string) (jwtToken, error) {
+func (s *Service) Login(ctx context.Context, username, password string) (LoginResult, error) {
 	user, err := s.repo.GetUser(ctx, username)
 
 	if err != nil {
-		return jwtToken{}, err
+		return LoginResult{}, err
 	}
 
 	if ComparePassword(user.PasswordHash, password) != nil {
-		return jwtToken{}, ErrPasswordMismatch
+		return LoginResult{}, ErrPasswordMismatch
 	}
 
 	token, err := s.tokenManager.IssueAccessToken(user.ID)
 
 	if err != nil {
-		return jwtToken{}, err
+		return LoginResult{}, err
 	}
 
-	return jwtToken{token.Value, token.ExpiresAt}, nil
+	return LoginResult{AccessToken: token.Value, ExpiresAt: token.ExpiresAt}, nil
 }
 
 func (s *Service) GetUserInfo(ctx context.Context, userID int64) (User, error) {

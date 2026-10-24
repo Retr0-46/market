@@ -13,6 +13,16 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
+// UserRepository is the persistence boundary used by the authentication
+// service. Keeping this interface small makes the service straightforward to
+// unit test with an in-memory fake.
+type UserRepository interface {
+	CreateUser(ctx context.Context, username, passwordHash, accountType string) (User, error)
+	GetUser(ctx context.Context, identifier any) (User, error)
+}
+
+var _ UserRepository = (*Repository)(nil)
+
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }

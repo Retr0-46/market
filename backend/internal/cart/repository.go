@@ -11,6 +11,17 @@ type Repository struct {
 	rdb *redis.Client
 }
 
+// CartRepository is the persistence boundary used by the cart service.
+type CartRepository interface {
+	GetCart(ctx context.Context, userID int64) ([]Item, error)
+	AddItem(ctx context.Context, userID, productID, quantity int64) (Item, error)
+	SetItem(ctx context.Context, userID, productID, quantity int64) (Item, error)
+	DeleteItem(ctx context.Context, userID, productID int64) error
+	ClearCart(ctx context.Context, userID int64) error
+}
+
+var _ CartRepository = (*Repository)(nil)
+
 func NewRepository(rdb *redis.Client) *Repository {
 	return &Repository{rdb: rdb}
 }
